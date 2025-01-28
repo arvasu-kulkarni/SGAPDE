@@ -1,6 +1,7 @@
 from pde import *
 import warnings
 import sys
+import time
 warnings.filterwarnings('ignore')
 
 
@@ -19,13 +20,13 @@ class Logger(object):
 
 class SGA:  # 最外层
     def __init__(self, num, depth, width, p_var, p_mute, p_rep, p_cro):
-        # num: pool里PDE的数量
-        # depth: 每个PDE的term的最大深度
-        # width: 每个PDE所含term的最大数量
-        # p_var: 生成树时节点为u/t/x而不是运算符的概率
-        # p_rep: 将（所有）pde某一项重新生成以替换原项的概率
-        # p_mute: PDE的树结构里每个节点的突变概率
-        # p_cro: 不同PDE之间交换term的概率
+        # num: number of PDEs in the pool
+        # depth: Maximum depth of term for each PDE
+        # width: maximum number ofterms per PDE
+        # p_var: probability that a node is u/t/x instead of an operator when generating the tree
+        # p_rep: probability that an item of (all) PDEs will be regenerated to replace an original item
+        # p_mute: probability of mutation for each node in the tree structure of a PDE
+        # p_cro: probability of exchanging term between different PDEs
         self.num = num
         self.p_mute = p_mute
         self.p_cro = p_cro
@@ -61,14 +62,27 @@ class SGA:  # 最外层
         self.mses, self.eqs = self.mses[0:num], self.eqs[0:num]
 
         # pdb.set_trace()
-
+    prevbesteq = []
     def run(self, gen=100):
         for i in range(1, gen+1):
+            print('here')
+            time0 = time.time()
             self.cross_over(self.p_cro)
+            time1 = time.time()
+            print(f"cross_over took {time1-time0:.2f} seconds")
             self.change(self.p_mute, self.p_rep)
+            time2 = time.time()
+            print(f"change (mutation) took {time2-time1:.2f} seconds")
             best_eq, best_mse = self.the_best()
+            time3 = time.time()
+            print(f"the_best took {time3-time2:.2f} seconds")
             print('{} generation best_aic & best Eq: {}, {}'.format(i, best_mse, best_eq.visualize()))
             print('best concise Eq: {}'.format(best_eq.concise_visualize()))
+            if i > 25:
+                if best_eq.visualize() == self.prevbesteq[-5]:
+                    print('The best equation has not changed for 5 generations, stop the iteration')
+                    break
+            self.prevbesteq.append(best_eq.visualize())
             if best_mse < 0:
                 print('We are close to the answer, pay attention')
             print('{} generation repeat cross over {} times and mutation {} times'.
@@ -76,23 +90,29 @@ class SGA:  # 最外层
             self.repeat_cross, self.repeat_change = 0, 0
 
     def the_best(self):
+        # print("running the_best")
         argmin = np.argmin(self.mses)
         return self.eqs[argmin], self.mses[argmin]
 
-    def cross_over(self, percentage=0.5): # 比如一代有2n个样本，先用最好的n个样本交叉，产生了m个新的不重复的样本。则最终提取了2n+m个样本中最好的2n个。
+    def cross_over(self, percentage=0.5): # For example, there are 2n samples in a generation, and the best n samples are first crossed with the best n samples, which produces m new unduplicated samples. Then the best 2n of the 2n+m samples are finally extracted.
         def cross_individual(pde1, pde2):
+            time0 = time.time()
             new_pde1, new_pde2 = copy.deepcopy(pde1), copy.deepcopy(pde2)
             w1, w2 = len(pde1.elements), len(pde2.elements)
             ix1, ix2 = np.random.randint(w1), np.random.randint(w2)
             new_pde1.elements[ix1] = pde2.elements[ix2]
             new_pde2.elements[ix2] = pde1.elements[ix1]
+            time1 = time.time()
+            # print(f"cross_individual took {time1-time0:.2f} seconds")
             return new_pde1, new_pde2
 
-        # 一半的好样本保存，并在此基础上交叉生成一半新样本
-        # print('begin crossover')
+        # Half of the good samples are saved and half of the new samples are cross-generated on this basis
+        print('begin crossover')
+        time0 = time.time()
         num_ix = int(self.num * percentage)
         new_eqs, new_mse = copy.deepcopy(self.eqs), copy.deepcopy(self.mses)
         sorted_indices = np.argsort(new_mse)
+        
         for i, ix in enumerate(sorted_indices):
             self.mses[i], self.eqs[i] = new_mse[ix], new_eqs[ix]
         copy_mses, copy_eqs = self.mses[0:num_ix], self.eqs[0:num_ix]  # top percentage samples
@@ -101,12 +121,13 @@ class SGA:  # 最外层
         reo_eqs, reo_mse = copy.deepcopy(copy_eqs), copy.deepcopy(copy_mses)
         random.shuffle(reo_mse)
         random.shuffle(reo_eqs)
-
+        time1 = time.time()
+        # print(f"copying took {time1-time0:.2f} seconds")
         for a, b in zip(new_eqs, reo_eqs):
-            new_a, new_b = cross_individual(a, b) # 在好样本的基础上交叉
+            new_a, new_b = cross_individual(a, b) # Crossover based on good samples
             if new_a.visualize() in pde_lib:
                 self.repeat_cross += 1
-            else: # 前一半样本交叉产生了新的pde，则加入lib中，并且加入当前代的全部样本中
+            else: # The first half of the samples that cross over to produce a new pde are added to the lib and added to all the samples in the current generation
                 a_err, a_w = evaluate_mse(new_a)
                 pde_lib.append(new_a.visualize())
                 err_lib.append((a_err, a_w))
@@ -133,13 +154,17 @@ class SGA:  # 最外层
         for i, ix in enumerate(sorted_indices):
             self.mses[i], self.eqs[i] = new_mse[ix], new_eqs[ix]
         new_eqs, new_mse = copy.deepcopy(self.eqs), copy.deepcopy(self.mses)
-
+        print(f"self.num is {self.num}")
         for i in range(self.num):
+            print(i)
+            time0 = time.time()
             # 保留最好的那部分eqs不change，只cross over.
             if i < 1: #保留最好的1个样本，不进行change
                 continue
             # print(self.eqs[i].visualize())
             new_eqs[i].mutate(p_mute)
+            time1 = time.time()
+            print(f"mutate took {time1-time0:.2f} seconds")
             replace_or_not = np.random.choice([False, True], p=([1 - p_rep, p_rep]))
             if replace_or_not:
                 new_eqs[i].replace()
@@ -152,7 +177,9 @@ class SGA:  # 最外层
                 err_lib.append((a_err, a_w))
                 self.mses.append(a_err)
                 self.eqs.append(new_eqs[i])
-
+                time2 = time.time()
+                print(f"evaluate_mse took {time2-time1:.2f} seconds")
+        print("here in mutations after all complete")
         new_eqs, new_mse = copy.deepcopy(self.eqs), copy.deepcopy(self.mses)
         sorted_indices = np.argsort(new_mse)[0:self.num] # 对当前一代所有的样本和新增非重复样本，整体做一次排序，提取最优的本代样本数个样本。
         for i, ix in enumerate(sorted_indices):
@@ -172,11 +199,11 @@ if __name__ == '__main__':
     # pdb.set_trace()
     sys.stdout = Logger('notes.log', sys.stdout)
     sys.stderr = Logger('notes.log', sys.stderr)
-    sga_num = 20
+    sga_num = 30
     sga_depth = 4
     sga_width = 5
-    sga_p_var = 0.5
-    sga_p_mute = 0.3
+    sga_p_var = 0.6
+    sga_p_mute = 0.75
     sga_p_cro = 0.5
     sga_run = 100
 

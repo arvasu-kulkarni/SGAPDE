@@ -4,7 +4,7 @@ import scipy.io as scio
 import torch
 import torch.nn as nn
 
-problem = 'chafee-infante' # 'Burgers' # 'chafee-infante' # 'Kdv' #'PDE_divide' # 'PDE_compound'
+problem = 'Cahn-Hilliard' # 'Burgers' # 'chafee-infante' # 'Kdv' #'PDE_divide' # 'PDE_compound'
 seed = 0
 device = torch.device('cuda:0')
 # device = torch.device('cpu')
@@ -28,7 +28,7 @@ print('use_metadata =', use_metadata)
 print('delete_edges =', delete_edges)
 
 # AIC hyperparameter
-aic_ratio = 1  # lower this ratio, less important is the number of elements to AIC value
+aic_ratio = 0.4  # lower this ratio, less important is the number of elements to AIC value
 
 
 print(path)
@@ -50,8 +50,12 @@ class Net(nn.Module):
 
 # Data
 def divide(up, down, eta=1e-10):
+    iter = 0
     while np.any(down == 0):
+        iter += 1
         down += eta
+        if iter > 100:
+            raise Exception('eta error in divide. ensure variables are at least 32 bit floats, or increase eta.')
     return up/down
 # PDE-1: Ut= -Ux/x + 0.25Uxx
 if problem == 'PDE_divide':
@@ -69,6 +73,7 @@ if problem == 'PDE_divide':
 # PDE-3: Ut= d(uux)(x)
 if problem == 'PDE_compound':
     u=np.load("./data/PDE_compound.npy").T
+    print(f"data shape {u.shape}")
     nx = 100
     nt = 251
     x=np.linspace(1,2,nx)
@@ -121,3 +126,37 @@ if problem == 'chafee-infante': # 301*200的新数据
     left_side_origin = 'left_side_origin = ut_origin'
 
 
+if problem == 'Cahn-Hilliard':
+    u = np.load("./data/cahn-hilliard-small.npy")
+    u = u[:, :, :150]
+    L = 100
+    Nx = Ny = 100
+    Nt = u.shape[2]
+    dt = 0.001
+    dx = 1
+    dy = 1
+    T = dt * Nt
+    x = np.arange(0, Nx) * dx
+    y = np.arange(0, Ny) * dy
+    t = np.arange(0, Nt) * dt
+    # right_side = 'right_side = 10.0000*u^3xx + 10.0000*u^3yy - 10.0000*uxx - 10.0000*uyy - 5.0000*uxxxx + 10*uxxyy + 5.0000*uyyy'
+    right_side = 'right_side = u'
+    left_side = 'left_side = ut'
+
+if problem == 'heat2D':
+    u = np.load("./data/2DHeatEquation.npy")
+    u = u.transpose(1, 2, 0)
+    assert u.shape[2] == 801
+    L = 50
+    Nx = Ny = u.shape[0]
+    Nt = u.shape[2]
+    dt = 0.0125
+    dx = 1
+    dy = 1
+    T = dt * Nt
+    x = np.arange(0, Nx) * dx
+    y = np.arange(0, Ny) * dy
+    t = np.arange(0, Nt) * dt
+    # right_side = 'right_side = 10.0000*u^3xx + 10.0000*u^3yy - 10.0000*uxx - 10.0000*uyy - 5.0000*uxxxx + 10*uxxyy + 5.0000*uyyy'
+    right_side = 'right_side = uxx + uyy'
+    left_side = 'left_side = ut'

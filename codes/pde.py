@@ -1,8 +1,13 @@
+import time
+time0 = time.time()
 from tree import *
 from PDE_find import Train
 from configure import aic_ratio
 from setup import default_names, num_default, u
 import warnings
+import numpy as np
+time1 = time.time()
+print(f"Importing in pde.py took {time1-time0:.2f} seconds")
 warnings.filterwarnings('ignore')
 
 
@@ -57,36 +62,43 @@ class PDE:
                 name += elements[i-num_default].inorder # element是SGA生成的候选集
         return name
 
+def printTree(tree_list):
+    for i in range(len(tree_list)):
+        name = ' '.join(node.name for node in tree_list[i])
+        print(name)
 
 def evaluate_mse(a_pde, is_term=False):
     if is_term:
         terms = a_pde
     else:
         terms = a_pde.elements
-    terms_values = np.zeros((u.shape[0] * u.shape[1], len(terms)))
+    terms_values = np.zeros((u.size, len(terms)))
+    # print(terms_values.shape)
     delete_ix = []
+    time0 = time.time()
     for ix, term in enumerate(terms):
+        # print("new tree")
         tree_list = term.tree
         max_depth = len(tree_list)
 
-        # 先搜索倒数第二层，逐层向上对数据进行运算直到顶部；排除底部空层
+        # Search the penultimate layer first, and work your way up to the top, excluding the empty layer at the bottom.
         for i in range(2, max_depth+1):
-            # 如果下面一层是空的，说明这一层肯定不是非空的倒数第二层
+            # If the bottom layer is empty, then it must not be a non-empty penultimate layer.
             if len(tree_list[-i+1]) == 0:
                 continue
-            else: # 这一层是非空至少倒数第二层，一个一个结点看过去
-                for j in range(len(tree_list[-i])):
-                    # 如果这一结点没有孩子，继续看右边的结点有没有
-                    if tree_list[-i][j].child_num == 0:
+            else: # This is the non-empty penultimate level, look at it one node at a time.
+                for j in range(len(tree_list[-i])): # If this node has no children, continue.
+                    # If this node has no children, continue looking at the nodes to the right.
+                    if tree_list[-i][j].child_num == 0: # If this node has no children, continue to the right node.
                         continue
 
-                    # 这一结点有一个孩子，用自己的运算符对孩子的cache进行操作
+                    # If this node has a child, use your own operator on the child's cache
                     elif tree_list[-i][j].child_num == 1:
                         child_node = tree_list[-i+1][tree_list[-i][j].child_st]
                         tree_list[-i][j].cache = tree_list[-i][j].cache(child_node.cache)
-                        child_node.cache = child_node.var  # 重置
+                        child_node.cache = child_node.var # reset
 
-                    # 这一结点有一两个孩子，用自己的运算符对两孩子的cache进行操作
+                    # This node has one or two children, use your own operators on the two children's cache
                     elif tree_list[-i][j].child_num == 2:
                         child1 = tree_list[-i+1][tree_list[-i][j].child_st]
                         child2 = tree_list[-i+1][tree_list[-i][j].child_st+1]
@@ -97,6 +109,8 @@ def evaluate_mse(a_pde, is_term=False):
                                 tmp = dt
                             elif what_is_denominator == 'x':
                                 tmp = dx
+                            elif what_is_denominator == 'y':
+                                tmp = dy
                             else:
                                 raise NotImplementedError()
 
@@ -104,28 +118,38 @@ def evaluate_mse(a_pde, is_term=False):
                                 pdb.set_trace()
                                 tree_list[-i][j].cache = tree_list[-i][j].var
 
-                            tree_list[-i][j].cache = tree_list[-i][j].cache(child1.cache, tmp, what_is_denominator)
+                            try:
+                                tree_list[-i][j].cache = tree_list[-i][j].cache(child1.cache, tmp, what_is_denominator)
+                            except:
+                                print(f"Error in shape, child cache shape is {child1.cache.shape}")
+                                print(f"tree is \n{tree2str_merge(tree_list)}")
+                                raise Exception
 
                         else:
+                            # print('Before error - ')
+                            # print(tree_list[-i][j], tree_list[-i][j].cache)
                             if isfunction(child1.cache) or isfunction(child2.cache):
                                 pdb.set_trace()
                             tree_list[-i][j].cache = tree_list[-i][j].cache(child1.cache, child2.cache)
-                        child1.cache, child2.cache = child1.var, child2.var  # 重置
+                        child1.cache, child2.cache = child1.var, child2.var # reset
 
-                    else:
+                else:
                         NotImplementedError()
-
-        if not any(tree_list[0][0].cache.reshape(-1)):  # 如果全是0，无法收敛且无意义
+        # print(f"cache shape at root - {tree_list[0][0].cache.shape}")
+        if not any(tree_list[0][0].cache.reshape(-1)): # if all zeros, not convergent and meaningless
             delete_ix.append(ix)
-            tree_list[0][0].cache = tree_list[0][0].var  # 重置缓冲池
+            tree_list[0][0].cache = tree_list[0][0].var # reset the buffer pool
             # print('0')
             # pdb.set_trace()
         else:
-            terms_values[:, ix:ix+1] = tree_list[0][0].cache.reshape(-1, 1)  # 把归并起来的该term记录下来
-            tree_list[0][0].cache = tree_list[0][0].var  # 重置缓冲池
+            # print(f'cache shape - {tree_list[0][0].cache.shape}')
+            terms_values[:, ix:ix+1] = tree_list[0][0].cache.flatten().reshape(-1, 1) # Record that term grouped together
+            tree_list[0][0].cache = tree_list[0][0].var # reset the buffer pool
             # print('not 0')
             # pdb.set_trace()
-
+        
+    time1 = time.time()
+    print(f"evaluate_mse took {time1-time0:.2f} seconds")
     move = 0
     for ixx in delete_ix:
         if is_term:
@@ -135,6 +159,8 @@ def evaluate_mse(a_pde, is_term=False):
             a_pde.W -= 1  # 实际宽度减一
         terms_values = np.delete(terms_values, ixx-move, axis=1)
         move += 1  # pop以后index左移
+    time2 = time.time()
+    print(f"deleting took {time2-time1:.2f} seconds")
 
     # 检查是否存在inf或者nan，或者terms_values是否被削没了
     if False in np.isfinite(terms_values) or terms_values.shape[1] == 0:
@@ -145,8 +171,12 @@ def evaluate_mse(a_pde, is_term=False):
 
     else:
         # 2D --> 1D
-        terms_values = np.hstack((default_terms, terms_values))
-        w, loss, mse, aic = Train(terms_values, ut.reshape(n * m, 1), 0, 1, aic_ratio)
+        # terms_values = np.hstack((default_terms, terms_values))
+        # print(f'ut shape - {ut.shape}')
+        w, loss, mse, aic = Train(terms_values, ut.reshape(-1, 1), 0, 1, aic_ratio)
+
+    time3 = time.time()
+    print(f"Train took {time3-time2:.2f} seconds")
 
     if is_term:
         return terms, w

@@ -11,6 +11,7 @@ import torch.optim as optim
 from sklearn.metrics import mean_squared_error
 import Data_generator as Data_generator
 import configure as config
+from sklearn.linear_model import Ridge
 
 seed = config.seed
 torch.random.manual_seed(seed)
@@ -53,16 +54,17 @@ def Diff(u, dxt, name):
     Here dx is a scalar, name is a str indicating what it is
     """
 
-    n, m = u.shape
-    uxt = np.zeros((n, m))
+    shape_tuple = u.shape
+    uxt = np.zeros(shape_tuple)
 
     if name == 'x':
-        for i in range(m):
-            uxt[:, i] = FiniteDiff(u[:, i], dxt)
+        uxt = np.gradient(u, axis=0)/dxt
+    
+    elif name == 'y':
+        uxt = np.gradient(u, axis=1)/dxt
 
     elif name == 't':
-        for i in range(n):
-            uxt[i, :] = FiniteDiff(u[i, :], dxt)
+        uxt = np.gradient(u, axis=2)/dxt
 
     else:
         NotImplementedError()
@@ -75,16 +77,20 @@ def Diff2(u, dxt, name):
     Here dx is a scalar, name is a str indicating what it is
     """
 
-    n, m = u.shape
-    uxt = np.zeros((n, m))
+    shape_tuple = u.shape
+    uxt = np.zeros(shape_tuple)
 
     if name == 'x':
-        for i in range(m):
-            uxt[:, i] = FiniteDiff2(u[:, i], dxt)
+        uxt = np.gradient(u, axis=0)/dxt
+        uxt = np.gradient(uxt, axis=0)/dxt
+    
+    elif name == 'y':
+        uxt = np.gradient(u, axis=1)/dxt
+        uxt = np.gradient(uxt, axis=1)/dxt
 
     elif name == 't':
-        for i in range(n):
-            uxt[i, :] = FiniteDiff2(u[i, :], dxt)
+        uxt = np.gradient(u, axis=2)/dxt
+        uxt = np.gradient(uxt, axis=2)/dxt
 
     else:
         NotImplementedError()
@@ -138,29 +144,36 @@ def Train(R, Ut, lam, d_tol, AIC_ratio=1, maxit=10, STR_iters=10, l0_penalty=1, 
 
     if sparse == 'STR':
         # Now increase tolerance until test performance decreases
-        for iter in range(maxit):
-            # Get a set of coefficients and error
-            w = STRidge(R, Ut, lam, STR_iters, tol, normalize=normalize)
-            # err = np.linalg.norm(TestY - TestR.dot(w), 2) + l0_penalty * np.count_nonzero(w)
-            data_err = np.linalg.norm(TestY - TestR.dot(w), 2)
-            mse = np.mean((TrainY - TrainR.dot(w)) ** 2)
+        # for iter in range(maxit):
+        # Get a set of coefficients and error
+        # print(f'tol for STR at iter {iter} - {tol}')
+        # reg = Ridge(alpha=lam, solver='lsqr', tol=tol)
+        # reg.fit(TrainR, TrainY)
+        # w = reg.coef_.T
+        tol = 1     # think they are using tol where most implementations would say lambda
+        w = STRidge(R, Ut, lam, STR_iters, tol, normalize=normalize)
+        # print('test', flush=True)
+        # err = np.linalg.norm(TestY - TestR.dot(w), 2) + l0_penalty * np.count_nonzero(w)
+        data_err = np.linalg.norm(TestY - TestR.dot(w), 2)
+        mse = np.mean((TrainY - TrainR.dot(w)) ** 2)
+        '''
+        # Has the accuracy improved?
+        aic = AIC(w[:, 0], mse)
+        if aic <= aic_best:
+            aic_best = aic
+            # err_best = err
+            mse_best = mse
+            w_best = w
+            data_err_best = data_err
+            tol_best = tol
+            tol = tol + d_tol
+        else:
+            tol = max([0, tol - 2 * d_tol])
+            d_tol = 2 * d_tol / (maxit - iter)
+            tol = tol + d_tol
+        '''
 
-            # Has the accuracy improved?
-            aic = AIC(w[:, 0], mse)
-            if aic <= aic_best:
-                aic_best = aic
-                # err_best = err
-                mse_best = mse
-                w_best = w
-                data_err_best = data_err
-                tol_best = tol
-                tol = tol + d_tol
-            else:
-                tol = max([0, tol - 2 * d_tol])
-                d_tol = 2 * d_tol / (maxit - iter)
-                tol = tol + d_tol
-
-        if print_best_tol: print("Optimal tolerance:", tol_best)
+    if print_best_tol: print("Optimal tolerance:", tol_best)
 
     elif sparse == 'Lasso':
         w = Lasso(R, Ut, lam, w=np.array([0]), maxit=maxit*10, normalize=normalize)
@@ -180,7 +193,7 @@ def STRidge(X0, y, lam, maxit, tol, normalize=0, print_results=False):
     """
     n, d = X0.shape
     X = np.zeros((n, d))
-    # First normalize data
+    # First normalize dataw
     if normalize != 0:
         Mreg = np.zeros((d, 1))
         for i in range(0, d):
@@ -220,8 +233,9 @@ def STRidge(X0, y, lam, maxit, tol, normalize=0, print_results=False):
         else:
             w[biginds] = np.linalg.lstsq(X[:, biginds], y)[0]
     # Now that we have the sparsity pattern, use standard least squares to get w
-    if biginds != []: 
+    if len(biginds) != 0: 
         w[biginds] = np.linalg.lstsq(X[:, biginds], y)[0]
+        # print('test')
     if normalize != 0:
         return np.multiply(Mreg, w)
     else:
@@ -258,12 +272,12 @@ def Lasso(X0, Y, lam, w=np.array([0]), maxit=100, normalize=2):
         w_old = w
         z = z - X.T.dot(X.dot(z) - Y) / L
         for j in range(d):
-            w[j] = np.multiply(np.sign(z[j]), np.max([abs(z[j]) - lam / L, 0]))
+            w[j] = np.multiply(np.sign(z[j]), np.max([np.max(abs(z[j]) - lam / L), 0]))
 
         # Could put in some sort of break condition based on convergence here.
     # Now that we have the sparsity pattern, used least squares.
     biginds = np.where(w != 0)[0]
-    if biginds != []: w[biginds] = np.linalg.lstsq(X[:, biginds], Y)[0]
+    if len(biginds) != 0: w[biginds] = np.linalg.lstsq(X[:, biginds], Y)[0]
     # Finally, reverse the regularization so as to be able to use with raw data
     if normalize != 0:
         return np.multiply(Mreg, w)

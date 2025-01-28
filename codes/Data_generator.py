@@ -23,12 +23,15 @@ device = config.device
 
 u=config.u
 x=config.x
+y=config.y
 t=config.t
-n, m = u.shape
+n, mx, my = u.shape
+print(f"u.shape: {u.shape}")
 Y_raw = pd.DataFrame(u.reshape(-1,1))
-X1 = np.repeat(x.reshape(-1,1), m, axis=1)
+X11 = np.repeat(x.reshape(-1,1), mx, axis=1)
+X12 = np.repeat(y.reshape(-1, 1), my, axis=1)
 X2 = np.repeat(t.reshape(1,-1), n, axis=0)
-X_raw_norm = pd.concat([pd.DataFrame(X1.reshape(-1,1)), pd.DataFrame(X2.reshape(-1,1))], axis=1, sort=False)
+X_raw_norm = pd.concat([pd.DataFrame(X11.reshape(-1,1)), pd.DataFrame(X12.reshape(-1,1)), pd.DataFrame(X2.reshape(-1,1))], axis=1, sort=False)
 
 
 if use_metadata == True:

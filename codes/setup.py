@@ -17,7 +17,7 @@ from configure import divide
 
 simple_mode = True
 see_tree = None
-plot_the_figures = True
+plot_the_figures = False
 use_metadata = False
 use_difference = True
 
@@ -53,44 +53,64 @@ random.seed(rand)
 
 # load Metadata
 u = Data_generator.u
-x = Data_generator.x
-t = Data_generator.t
+x = np.float32(Data_generator.x)
+t = np.float32(Data_generator.t)
+y = np.float32(Data_generator.y)
 x_all = Data_generator.x_all
-n, m = u.shape
+nx, ny, m = u.shape
 dx = x[2]-x[1]
 dt = t[1]-t[0]
+dy = y[2]-y[1]
 # 扩充维度使得与u的size相同
-x = np.tile(x, (m, 1)).transpose((1, 0))
-x_all = np.tile(x_all, (m, 1)).transpose((1, 0))
-t = np.tile(t, (n, 1))
+x = np.tile(x.reshape(nx, 1, 1), (1, ny, m))
+x_all = np.tile(x_all.reshape(nx, 1, 1), (1, ny, m))
+y = np.tile(y.reshape(1, ny, 1), (nx, 1, m))
+t = np.tile(t.reshape(1, 1, m), (nx, ny, 1))
 
 # load Origin data
 u_origin=config.u
 x_origin=config.x
 t_origin=config.t
-n_origin, m_origin = u_origin.shape
+y_origin=config.y
+n_origin_x, n_origin_y, m_origin = u_origin.shape
 dx_origin = x_origin[2]-x_origin[1]
+dy_origin = y_origin[2]-y_origin[1]
 dt_origin = t_origin[1]-t_origin[0]
 # 扩充维度使得与u的size相同
-x_origin = np.tile(x_origin, (m_origin, 1)).transpose((1, 0))
-t_origin = np.tile(t_origin, (n_origin, 1))
+x_origin = np.tile(x_origin.reshape(n_origin_x, 1, 1), (1, n_origin_y, m_origin))
+y_origin = np.tile(y_origin.reshape(1, n_origin_y, 1), (n_origin_x, 1, m_origin))
+t_origin = np.tile(t_origin.reshape(1, 1, m_origin), (n_origin_x, n_origin_y, 1))
 
-# 差分
+# increment
 # calculate the error of correct cofs & correct terms
 if use_difference == True:
-    ut = np.zeros((n, m))
-    for idx in range(n):
-        ut[idx, :] = FiniteDiff(u[idx, :], dt)
-    ux = np.zeros((n, m))
-    uxx = np.zeros((n, m))
-    uxxx = np.zeros((n, m))
-    for idx in range(m):
-        ux[:, idx] = FiniteDiff(u[:, idx], dx) #idx is the id of one time step
+    shape = (nx, ny, m)
+    ut = np.zeros(shape)
+    ut = np.gradient(u, axis=2)/dt
+
+    ux = np.zeros(shape)
+    uxx = np.zeros(shape)
+    uxxx = np.zeros(shape)
+    ux = np.gradient(u, axis=0)/dx
+    uxx = np.gradient(ux, axis=0)/dx
+    uxxx = np.gradient(uxx, axis=0)/dx
+    uxxxx = np.gradient(uxxx, axis=0)/dx
+    uy = np.gradient(u, axis=1)/dy
+    uyy = np.gradient(uy, axis=1)/dy
+    uyyy = np.gradient(uyy, axis=1)/dy
+    uyyyy = np.gradient(uyyy, axis=1)/dy
+    uxy = np.gradient(ux, axis=1)/dy
+    
+    '''
+    for idx in range(mx):
+        for idy in range(my):
+            ux[:, idx, :] = FiniteDiff(u[:, idx, :], dx) #idx is the id of one time step
     for idx in range(m):
         uxx[:, idx] = FiniteDiff(ux[:, idx], dx)
     for idx in range(m):
         uxxx[:, idx] = FiniteDiff(uxx[:, idx], dx)
-
+    '''
+    '''
     ut_origin = np.zeros((n_origin, m_origin))
     for idx in range(n_origin):
         ut_origin[idx, :] = FiniteDiff(u_origin[idx, :], dt_origin)
@@ -103,6 +123,7 @@ if use_difference == True:
         uxx_origin[:, idx] = FiniteDiff(ux_origin[:, idx], dx_origin)
     for idx in range(m_origin):
         uxxx_origin[:, idx] = FiniteDiff(uxx_origin[:, idx], dx_origin)
+    '''
 
 # autograd 问题在于被求导的部分形式不确定，如果每次重新训练神经网，代价过高。
 if use_autograd == True:
@@ -147,15 +168,15 @@ if use_autograd == True:
 # calculate error
 exec (config.right_side)
 exec (config.left_side)
-n1, n2, m1, m2 = int(n*0.1), int(n*0.9), int(m*0), int(m*1)
+n1, n2, mx1, mx2, my1, my2 = int(nx*0.1), int(nx*0.9), int(ny*0.1), int(ny*0.9), int(m*0), int(m*1)
 right_side_full = right_side
-right_side = right_side[n1:n2, m1:m2]
-left_side = left_side[n1:n2, m1:m2]
-right = np.reshape(right_side, ((n2-n1)*(m2-m1), 1))
-left = np.reshape(left_side, ((n2-n1)*(m2-m1), 1))
-diff = np.linalg.norm(left-right, 2)/((n2-n1)*(m2-m1))
+right_side = right_side[n1:n2, mx1:mx2, my1:my2]
+left_side = left_side[n1:n2, mx1:mx2, my1:my2]
+right = np.reshape(right_side, ((n2-n1)*(mx2-mx1)*(my2-my1), 1))
+left = np.reshape(left_side, ((n2-n1)*(mx2-mx1)*(my2-my1), 1))
+diff = np.linalg.norm(left-right, 2)/((n2-n1)*(mx2-mx1)*(my2-my1))
 print('data error without edges',diff)
-
+'''
 exec (config.right_side_origin)
 exec (config.left_side_origin)
 n1_origin, n2_origin, m1_origin, m2_origin = int(n_origin*0.1), int(n_origin*0.9), int(m_origin*0), int(m_origin*1)
@@ -166,18 +187,20 @@ right_origin = np.reshape(right_side_origin, ((n2_origin-n1_origin)*(m2_origin-m
 left_origin = np.reshape(left_side_origin, ((n2_origin-n1_origin)*(m2_origin-m1_origin), 1))
 diff_origin = np.linalg.norm(left_origin-right_origin, 2)/((n2_origin-n1_origin)*(m2_origin-m1_origin))
 print('data error_origin without edges',diff_origin)
+'''
 
 exec (config.right_side)
 exec (config.left_side)
-n1, n2, m1, m2 = int(n*0), int(n*1), int(m*0), int(m*1)
+n1, n2, mx1, mx2, my1, my2 = int(nx*0), int(nx*1), int(ny*0), int(ny*1), int(m*0), int(m*1)
 right_side_full = right_side
-right_side = right_side[n1:n2, m1:m2]
-left_side = left_side[n1:n2, m1:m2]
-right = np.reshape(right_side, ((n2-n1)*(m2-m1), 1))
-left = np.reshape(left_side, ((n2-n1)*(m2-m1), 1))
-diff = np.linalg.norm(left-right, 2)/((n2-n1)*(m2-m1))
+right_side = right_side[n1:n2, mx1:mx2, my1:my2]
+left_side = left_side[n1:n2, mx1:mx2, my1:my2]
+right = np.reshape(right_side, ((n2-n1)*(mx2-mx1)*(my2-my1), 1))
+left = np.reshape(left_side, ((n2-n1)*(mx2-mx1)*(my2-my1), 1))
+diff = np.linalg.norm(left-right, 2)/((n2-n1)*(mx2-mx1)*(my2-my1))
 print('data error',diff)
 
+'''
 exec (config.right_side_origin)
 exec (config.left_side_origin)
 n1_origin, n2_origin, m1_origin, m2_origin = int(n_origin*0), int(n_origin*1), int(m_origin*0), int(m_origin*1)
@@ -188,7 +211,8 @@ right_origin = np.reshape(right_side_origin, ((n2_origin-n1_origin)*(m2_origin-m
 left_origin = np.reshape(left_side_origin, ((n2_origin-n1_origin)*(m2_origin-m1_origin), 1))
 diff_origin = np.linalg.norm(left_origin-right_origin, 2)/((n2_origin-n1_origin)*(m2_origin-m1_origin))
 print('data error_origin',diff_origin)
-
+'''
+'''
 # plot the figures
 if plot_the_figures == True:
     from matplotlib.pyplot import MultipleLocator
@@ -314,24 +338,26 @@ if plot_the_figures == True:
     plt.savefig(config.problem + '_Original_Residual_'+'%d'%(config.max_epoch/1000) + 'k.png', dpi = 300, bbox_inches='tight')
 
     plt.show()
-
+'''
 
 ###########################################################################################
 # for default evaluation
-default_u = np.reshape(u, (u.shape[0]*u.shape[1], 1))
-default_ux = np.reshape(ux, (u.shape[0]*u.shape[1], 1))
-default_uxx = np.reshape(uxx, (u.shape[0]*u.shape[1], 1))
-# default_uxxx = np.reshape(uxxx, (u.shape[0]*u.shape[1], 1))
-default_u2 = np.reshape(u**2, (u.shape[0]*u.shape[1], 1))
-default_u3 = np.reshape(u**3, (u.shape[0]*u.shape[1], 1))
+# default_u = np.reshape(u, (u.size, 1))
+# default_ux = np.reshape(ux, (u.size, 1))
+# default_uxx = np.reshape(uxx, (u.size, 1))
+# # default_uxxx = np.reshape(uxxx, (u.shape[0]*u.shape[1], 1))
+# default_u2 = np.reshape(u**2, (u.size, 1))
+# default_u3 = np.reshape(u**3, (u.size, 1))
 # default_terms = np.hstack((default_u, default_ux, default_uxx, default_u2, default_u3))
 # default_names = ['u', 'ux', 'uxx', 'u^2', 'u^3']
 # default_terms = np.hstack((default_u, default_ux))
 # default_names = ['u', 'ux']
-default_terms = np.hstack((default_u)).reshape(-1,1)
-default_names = ['u']
+# default_terms = np.hstack((default_u)).reshape(-1,1)
+default_terms = np.array([])
+default_names = []
 print(default_terms.shape)
-num_default = default_terms.shape[1]
+# num_default = default_terms.shape[1]
+num_default = 0
 
 zeros = np.zeros(u.shape)
 
@@ -342,17 +368,21 @@ if simple_mode:
     #                 ['+', 2, np.add], ['-', 2, np.subtract], ['*', 2, np.multiply], ['d', 2, Diff]])
     # OP1 = np.array([['sin', 1, np.sin], ['cos', 1, np.cos]])
 
+    # NOTE - REMOVED ux from ALL and other lists
     ALL = np.array([['+', 2, np.add], ['-', 2, np.subtract],['*', 2, np.multiply], ['/', 2, divide], ['d', 2, Diff], ['d^2', 2, Diff2], 
-                    ['u', 0, u], ['x', 0, x], ['ux', 0, ux],  ['0', 0, zeros],
-                    ['^2', 1, np.square], ['^3', 1, cubic]]) #  ['u^2', 0, u**2], ['uxx', 0, uxx], ['t', 0, t],
+                    ['u', 0, u], ['x', 0, x], ['y', 0, y],  ['0', 0, zeros],
+                    ['^2', 1, np.square], ['^3', 1, cubic]], dtype=object) #  ['u^2', 0, u**2], ['uxx', 0, uxx], ['t', 0, t],
+    # guess - OPS are operand nodes
     OPS = np.array([['+', 2, np.add], ['-', 2, np.subtract], ['*', 2, np.multiply], ['/', 2, divide],
                     ['d', 2, Diff], ['d^2', 2, Diff2], ['^2', 1, np.square], ['^3', 1, cubic]])
+    # guess - ROOT are OPS nodes that can be roots (+/- cannot be roots)
     ROOT = np.array([['*', 2, np.multiply], ['d', 2, Diff], ['d^2', 2, Diff2], ['/', 2, divide], ['^2', 1, np.square], ['^3', 1, cubic]])
     OP1 = np.array([['^2', 1, np.square], ['^3', 1, cubic]])
     OP2 = np.array([['+', 2, np.add], ['-', 2, np.subtract], ['*', 2, np.multiply], ['/', 2, divide], ['d', 2, Diff], ['d^2', 2, Diff2]])
     # VARS = np.array([['u', 0, u], ['x', 0, x], ['0', 0, zeros], ['ux', 0, ux], ['uxx', 0, uxx], ['u^2', 0, u**2]]) 
-    VARS = np.array([['u', 0, u], ['x', 0, x], ['0', 0, zeros], ['ux', 0, ux]])
-    den = np.array([['x', 0, x]])
+    # DELETING x FROM VARS because shape different, and physically not possible?
+    VARS = np.array([['u', 0, u], ['ux', 0, ux], ['uy', 0, uy]], dtype=object)
+    den = np.array([['x', 0, x], ['y', 0, y]], dtype=object)
 
 # else:
 #     ALL = np.array([['sin', 1, np.sin], ['cos', 1, np.cos], ['log', 1, np.log], ['+', 2, np.add], ['-', 2, np.subtract],
